@@ -1,8 +1,8 @@
 """Time-budgeted two-worker research. Committed results resume without repetition."""
 from concurrent.futures import ProcessPoolExecutor,wait,FIRST_COMPLETED
-import hashlib,json,multiprocessing,os,sqlite3,threading,time
+import hashlib,json,multiprocessing,os,sqlite3,threading,time,zlib
 from pathlib import Path
-from deep_engine import deep_configs,run_deep_chunk,run_cached_chunk,init_research_worker,worker_budget,portfolio_replay,train_score,windows,VERSION
+from deep_engine import deep_configs,run_deep_chunk,run_cached_chunk,init_research_worker,worker_budget,portfolio_replay,train_score,windows,VERSION,EXTENDED_VERSION,extended_configs,EVALUATIONS_PER_COIN,decode_result
 from batch_engine import evaluate,prepare
 from history_data import load_history,ResearchStopped,read_plan,new_plan
 
@@ -36,8 +36,9 @@ class DeepLab:
             plan=read_plan(self.data)
             out['plan']=plan
             out['coin_count']=len(plan['symbols']) if plan else 5
+            out['planned_total']=out['coin_count']*EVALUATIONS_PER_COIN
             out['worker_alive']=bool(getattr(self,'thread',None) and self.thread.is_alive())
-            if out['status']=='idle': out['total']=out['coin_count']*200_000
+            if out['status']=='idle': out['total']=out['coin_count']*EVALUATIONS_PER_COIN
             if out['status'] in ('running','cancelling'): out['elapsed']=round(time.monotonic()-self.started,1)
             out['evaluations_per_second']=round(max(0,out['done']-out.get('resumed',0))/max(.01,out['elapsed']),1)
             out['active_workers']=out.get('busy_workers',0) if out['worker_alive'] else 0
@@ -47,15 +48,18 @@ class DeepLab:
         with self.lock:
             if self.state['status'] in ('running','cancelling'): raise ValueError('Interrompi e salva prima di cambiare monete')
             plan=new_plan(self.data,count)
-            self.state.update(status='idle',phase='Estrazione salvata: pronta per la ricerca',done=0,total=count*200_000,top=[],walk_forward=[],report=None,replay=None,arena=None,validation=[],approved=[],error=None,download_done=0,download_total=count*24,resumed=0,datasets=[])
+            self.state.update(status='idle',phase='Estrazione salvata: pronta per la ricerca',done=0,total=count*EVALUATIONS_PER_COIN,top=[],walk_forward=[],report=None,replay=None,arena=None,validation=[],approved=[],error=None,download_done=0,download_total=count*24,resumed=0,datasets=[])
             return plan
     def start(self,minutes):
         if minutes not in (5,15,30,'auto'): raise ValueError('Scegli automatico oppure 5, 15 o 30 minuti')
         with self.lock:
             if self.state['status'] in ('running','cancelling'): raise ValueError('Ricerca già in corso')
+            research_round=self.state.get('research_round',0)
+            if self.state.get('research_engine')==EXTENDED_VERSION and self.state['status']=='completed':research_round+=1
+            self.state.update(research_round=research_round,research_engine=EXTENDED_VERSION,new_evaluations=0)
             self.cancel.clear();self.started=time.monotonic();self.deadline=float('inf') if minutes=='auto' else self.started+minutes*60
             plan=read_plan(self.data) or new_plan(self.data,5)
-            self.state.update(status='running',phase='Preparazione storico Binance / USDT',done=0,total=len(plan['symbols'])*200_000,resumed=0,datasets=[],elapsed=0,budget_minutes=None if minutes=='auto' else minutes,automatic=minutes=='auto',download_done=0,download_total=len(plan['symbols'])*len(plan['months']),top=[],walk_forward=[],error=None,report=None,replay=None,arena=None,validation=[],progress_at=time.time())
+            self.state.update(status='running',phase='Preparazione storico Binance / USDT',done=0,total=len(plan['symbols'])*EVALUATIONS_PER_COIN,resumed=0,datasets=[],elapsed=0,budget_minutes=None if minutes=='auto' else minutes,automatic=minutes=='auto',download_done=0,download_total=len(plan['symbols'])*len(plan['months']),top=[],walk_forward=[],error=None,report=None,replay=None,arena=None,validation=[],validation_note=None,progress_at=time.time())
             self.thread=threading.Thread(target=self._run,daemon=False);self.thread.start()
     def stop(self):
         with self.lock:
@@ -117,14 +121,32 @@ class DeepLab:
                     if key not in best or candidate>best[key][0]: best[key]=(candidate,r)
         try:
             datasets,manifest=load_history(self.data,self.progress,self.stopped)
-            configs=deep_configs()
-            fingerprint=hashlib.sha256(json.dumps(dict(version=VERSION,manifest=manifest,configs=configs),sort_keys=True).encode()).hexdigest()
+            while True:
+                configs=extended_configs(self.state['research_round'])
+                fingerprint=hashlib.sha256(json.dumps(dict(version=EXTENDED_VERSION,manifest=manifest,configs=configs),sort_keys=True).encode()).hexdigest()
+                existing=self.data/'deep_research'/fingerprint/'checkpoint.sqlite3'
+                count=0
+                if existing.is_file():
+                    old_check=sqlite3.connect(existing.resolve().as_uri()+'?mode=ro',uri=True)
+                    try:count=old_check.execute('SELECT COUNT(*) FROM results').fetchone()[0]
+                    finally:old_check.close()
+                if count<len(datasets)*len(configs):break
+                with self.lock:self.state['research_round']+=1
             folder=self.data/'deep_research'/fingerprint;folder.mkdir(parents=True,exist_ok=True)
-            (folder/'manifest.json').write_text(json.dumps(dict(version=VERSION,sources=manifest,configs=configs),ensure_ascii=False),encoding='utf-8')
+            (folder/'manifest.json').write_text(json.dumps(dict(version=EXTENDED_VERSION,sources=manifest,configs=configs),ensure_ascii=False),encoding='utf-8')
             db=sqlite3.connect(folder/'checkpoint.sqlite3');db.execute('CREATE TABLE IF NOT EXISTS results (key TEXT PRIMARY KEY, payload TEXT NOT NULL)');db.commit()
+            if db.execute('SELECT COUNT(*) FROM results').fetchone()[0]==0:
+                old_fingerprint=hashlib.sha256(json.dumps(dict(version=VERSION,manifest=manifest,configs=deep_configs()),sort_keys=True).encode()).hexdigest()
+                previous=self.data/'deep_research'/old_fingerprint/'checkpoint.sqlite3'
+                if previous.is_file():
+                    old=sqlite3.connect(previous.resolve().as_uri()+'?mode=ro',uri=True)
+                    try:
+                        with db:
+                            for key,payload in old.execute('SELECT key,payload FROM results'):db.execute('INSERT OR IGNORE INTO results VALUES (?,?)',(key,zlib.compress(payload.encode() if isinstance(payload,str) else zlib.decompress(payload),1)))
+                    finally:old.close()
             with self.lock: self.state['phase']='Lettura dei risultati già salvati'
             for row_number,(key,payload) in enumerate(db.execute('SELECT key,payload FROM results ORDER BY key'),1):
-                keys.add(key);ingest(json.loads(payload))
+                keys.add(key);ingest(decode_result(payload))
                 if row_number%2000==0:
                     with self.lock:self.state.update(done=len(keys)*8,resumed=len(keys)*8,progress_at=time.time())
             resumed=len(keys)*8
@@ -156,9 +178,9 @@ class DeepLab:
                     for future in finished:
                         pending.remove(future);results=future.result()
                         with db:
-                            for r in results: db.execute('INSERT INTO results VALUES (?,?)',(r['key'],json.dumps(r,allow_nan=False)))
+                            for r in results: db.execute('INSERT INTO results VALUES (?,?)',(r['key'],zlib.compress(json.dumps(r,allow_nan=False).encode(),1)))
                         for r in results: keys.add(r['key']);ingest(r)
-                        with self.lock: self.state.update(done=len(keys)*8,top=list(top),progress_at=time.time())
+                        with self.lock: self.state.update(done=len(keys)*8,new_evaluations=len(keys)*8-resumed,top=list(top),progress_at=time.time())
                         if results and time.monotonic()-last_replay>=20:
                             r=results[0];d=next(d for d in datasets if d['pair']==r['pair']);c=r['config']
                             visible=d['rows'][:int(len(d['rows'])*.8)]
@@ -178,24 +200,31 @@ class DeepLab:
             walk=[]
             for (pair,i),(_,r) in sorted(best.items()):
                 stress=db.execute('SELECT payload FROM results WHERE key=?',(f"{pair}:{r['index']+1}",)).fetchone()
-                walk.append(dict(symbol=r['symbol'],period=i+1,config=r['config'],train=r['folds'][i]['train'],test=r['folds'][i]['test'],stress_test=json.loads(stress[0])['folds'][i]['test'] if stress else None))
+                walk.append(dict(symbol=r['symbol'],period=i+1,config=r['config'],train=r['folds'][i]['train'],test=r['folds'][i]['test'],stress_test=decode_result(stress[0])['folds'][i]['test'] if stress else None))
             with self.lock:
                 complete=self.state['done']==self.state['total'];status='completed' if complete else ('paused' if self.cancel.is_set() else 'budget')
                 self.state.update(phase='Salvataggio riepilogo',walk_forward=walk)
             validation=None
             if complete and not self.cancel.is_set():
-                with self.lock:self.state['phase']='Verifica finale su periodi separati'
-                validation=self._validate_final(datasets,self._candidates(best),folder)
-                with self.lock:self.state.update(arena=validation['arena'],validation=validation['checks'],approved=validation['approved'],holdout_reused=validation['reused'])
-                policies=dict(schema=1,source_fingerprint=fingerprint,verified_at=time.time(),currency='USDT',target='solo simulazione Kraken EUR; mercato differente',approved=validation['approved'])
-                target=self.data/'learned_rules.json';temp=target.with_suffix('.tmp');temp.write_text(json.dumps(policies,ensure_ascii=False),encoding='utf-8');os.replace(temp,target)
+                candidates=self._candidates(best)
+                arena=portfolio_replay(datasets,candidates,.4,.8)
+                stress_arena=portfolio_replay(datasets,candidates,.4,.8,cost_scenario='stress')
+                checks=[]
+                for c in candidates:
+                    rows=next(d['rows'] for d in datasets if d['pair']==c['pair']);config=c['config']
+                    prep=prepare(rows[:int(len(rows)*.8)],sorted({config.get('fast',20),config.get('slow',50),config.get('exit_ma',20)}),[config.get('lookback',20)])
+                    base=evaluate(rows,config,int(len(rows)*.4),int(len(rows)*.8),prep)
+                    stressed=evaluate(rows,dict(config,cost='stress'),int(len(rows)*.4),int(len(rows)*.8),prep)
+                    checks.append(dict(c,development=base,stress=stressed,approved=False,reasons=['Verifica indipendente futura necessaria']))
+                validation=dict(status='exploratory',reason='Il periodo finale precedente e gia stato osservato: non e una nuova verifica indipendente',checks=checks,approved=[],arena=arena,stress_arena=stress_arena)
+                with self.lock:self.state.update(arena=arena,validation=checks,approved=[],validation_note=validation['reason'])
+                temp=folder/'validation.tmp';temp.write_text(json.dumps(validation,ensure_ascii=False,allow_nan=False),encoding='utf-8');os.replace(temp,folder/'validation.json')
             report=folder/'report.json';tmp=folder/'report.tmp'
-            summary=dict(version='0.5',selection_plan=read_plan(self.data),engine=VERSION,status=status,completed_evaluations=len(keys)*8,target_evaluations=len(datasets)*len(configs)*8,
-                         resumed_evaluations=resumed,new_evaluations=len(keys)*8-resumed,all_four_positive=positive,parameter_coin_cost_results=len(keys),
-                         input_sha256=fingerprint,elapsed_session_seconds=round(time.monotonic()-self.started,1),datasets=self.state['datasets'],top=top,walk_forward=walk,
-                         full_results_file='checkpoint.sqlite3',methodology='12,500 rules x 2 costs x N selected coins x 4 folds x 2 windows = 200,000 evaluations per coin, not independent strategies. 24 full months Binance spot USDT, not Kraken EUR. Rolling earlier 40% training -> next 10% test, four periods, last 20% excluded. Train-only selection: return minus 0.5*drawdown, at least 20 trades. Top ranking uses test windows and is exploratory. Each window starts with 1000 USDT, 20% allocation. No combined portfolio, historical spread, delisted coins, taxes or 5% entry halt. All results stored in SQLite. No automatic strategy promotion. Repeated inspection is not independent validation.')
-            summary.update(application_version='0.9.3',workers=workers,chunk_size=32,validation=validation,
-                           methodology='Development: first 80%, four rolling folds. One rule per asset frozen from last training fold using return minus 0.5*drawdown and at least 20 trades. Final 20% checked once for base and stressed costs; repeated identical checks reuse saved validation. Experimental continuous portfolio includes rejected rules and is visibly separate from approved paper rules. Maximum two positions, 20% per entry, next-open execution. No leverage or real orders. Cash conservation alone is not a pass.')
+            summary=dict(version='1.0',application_version='0.10.0',research_engine=EXTENDED_VERSION,research_round=self.state['research_round'],selection_plan=read_plan(self.data),status=status,
+                         completed_evaluations=len(keys)*8,target_evaluations=len(datasets)*len(configs)*8,resumed_evaluations=resumed,new_evaluations=len(keys)*8-resumed,
+                         all_four_positive=positive,parameter_coin_cost_results=len(keys),input_sha256=fingerprint,elapsed_session_seconds=round(time.monotonic()-self.started,1),
+                         datasets=self.state['datasets'],top=top,walk_forward=walk,full_results_file='checkpoint.sqlite3',workers=workers,chunk_size=32,validation=validation,
+                         methodology='250,000 unique rules per full block; two costs, four development folds, train and test windows = 4 million evaluations per asset. Prior results imported as resumed, not new work. Subsequent completed rounds use disjoint dense parameter blocks. Bounded indicator caches and compressed SQLite. Final 20% previously observed is excluded entirely from this intensive research. Experimental continuous portfolio on development, no new paper promotion without fresh independent data. Spot maximum two positions, 20% allocation, previous-close signals and next-open fills; costs included. No real orders.')
             tmp.write_text(json.dumps(summary,ensure_ascii=False,allow_nan=False),encoding='utf-8');os.replace(tmp,report)
             with self.lock: self.state.update(status=status,phase='Completato' if complete else 'Salvato: Avvia / Riprendi per continuare',report=str(report),progress_at=time.time())
         except ResearchStopped:

@@ -1,8 +1,11 @@
-CRYPTO DESK 0.9.3
+CRYPTO DESK 0.10.0
 
 Apri sempre l'icona Crypto Desk sul desktop.
 All'apertura l'app resta in attesa: non avvia ricerca, simulazione o replay.
-Il messaggio FATTO non viene riproposto per lo studio di una vecchia apertura.
+Il messaggio FATTO richiede nuovi calcoli, processi terminati, replay arrivato
+alla fine e salvataggio automatico riuscito. La simulazione attuale si ferma
+al termine dello studio. Il replay e una visualizzazione del calcolo gia fatto.
+Il messaggio non viene riproposto per lo studio di una vecchia apertura.
 Premi Inizia ad imparare: ricerca storica e simulazione partono insieme.
 Il grafico riproduce saldi e operazioni effettivamente calcolati; la scritta
 REPLAY ACCELERATO indica la riproduzione di un test gia calcolato.
@@ -35,3 +38,15 @@ Dati e checkpoint restano in %LOCALAPPDATA%\CryptoDesk\data.
 L'installazione richiede Python 3.10+ e Edge/Chrome. Gli aggiornamenti si
 controllano all'apertura e mantengono i dati. Per installare su un altro PC,
 apri Crypto_Desk_Installa.cmd.
+
+STUDIO INTENSIVO
+250.000 regole uniche x due costi x quattro periodi x allenamento/test:
+4 milioni di valutazioni per moneta, 20 milioni per cinque monete.
+Il milione precedente viene importato come lavoro gia svolto. Restano circa
+19 milioni di nuovi test. Puo richiedere diverse ore, secondo il PC.
+Dopo un blocco completato, il successivo esplora un blocco diverso di regole.
+Le sessioni interrotte riprendono dal checkpoint senza rifare i test salvati.
+Nuove regole su storico gia analizzato restano sperimentali: il periodo finale
+visto in precedenza non viene riutilizzato come verifica indipendente.
+Le regole paper approvate in precedenza restano conservate. I risultati SQLite
+nuovi sono compressi; copie esportate restano coerenti mentre lo studio continua.

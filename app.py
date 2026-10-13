@@ -11,7 +11,7 @@ DATA=Path(os.environ.get('CRYPTO_DESK_DATA',str(ROOT/'data'))); DATA.mkdir(paren
 LAB=BatchLab(DATA); DEEP=DeepLab(DATA)
 STOP_EVENT=threading.Event()
 LOCK=threading.RLock(); TOKEN=secrets.token_urlsafe(24); PORT=8877
-VERSION="0.9.3"; MAX_QUOTE_AGE=180
+VERSION="0.10.0"; MAX_QUOTE_AGE=180
 ROLES=['Scanner','Selezionatore','Analista','Critico','Rischio','Simulatore']
 STATE={'session_started_at':None,'busy':False,'running':False,'stage':'Pronto','updated':None,'quotes_at':None,'warnings':[],'market':[],'analyses':{},'logs':[],'roles':{r:'In attesa' for r in ROLES},'error':None}
 ROLE_ACTIVITY={r:dict(events=0,last_at=None) for r in ROLES}
@@ -156,7 +156,7 @@ def module_audit(deep):
         'Scanner':('Dati integri e aggiornati',f"{deep.get('download_done',0)} / {deep.get('download_total',0)} archivi",'errore' if STATE['error'] else 'attivo' if active and deep.get('download_done',0)<deep.get('download_total',0) else 'verificato'),
         'Selezionatore':('Regole scelte sullo sviluppo',f"{len(validation)} candidate · {len(deep.get('approved',[]))} approvate",'in attesa' if not validation else 'verificato'),
         'Analista':('Calcolo delle strategie',f"{deep.get('done',0):,} valutazioni".replace(',','.'),'attivo' if active else 'completato' if deep.get('status')=='completed' else 'in pausa'),
-        'Critico':('Verifica separata e costi stress',f"{len(validation)} regole controllate",'verificato' if validation else 'in attesa'),
+        'Critico':('Confronto costi e limiti della verifica',f"{len(validation)} regole controllate",'verificato' if validation else 'in attesa'),
         'Rischio':('Costi, capitale e perdite',f"Perdita dal picco {arena.get('drawdown_pct',0):.1f}%",'verificato' if arena else 'in attesa'),
         'Simulatore':('Portafoglio storico e paper',f"{arena.get('trade_count',0)} operazioni storiche",'attivo' if STATE['busy'] or active else 'in attesa del segnale' if STATE['running'] else 'in pausa')}
     return {role:dict(task=t[0],result=t[1],status=t[2],**ROLE_ACTIVITY[role]) for role,t in tasks.items()}
@@ -222,7 +222,8 @@ class ExportManager:
             if self.thread and self.thread.is_alive():
                 if kind=='automatica':self.pending_automatic=True
                 return dict(self.job)
-            self.job=dict(status='saving',kind=kind,started_at=time.time(),path=None,error=None)
+            automatic={k:v for k,v in self.job.items() if k.startswith('automatic_')}
+            self.job=dict(status='saving',kind=kind,started_at=time.time(),path=None,error=None,**automatic)
             self.thread=threading.Thread(target=self._save,daemon=False);self.thread.start()
             return dict(self.job)
     def _save(self):
@@ -232,7 +233,9 @@ class ExportManager:
             name='Crypto_Desk_'+time.strftime('%Y-%m-%d_%H-%M-%S')+'_'+secrets.token_hex(2)+'.zip'
             path=self.directory/name;temp=path.with_suffix('.zip.tmp')
             export_all(temp);os.replace(temp,path)
-            with self.lock:self.job.update(status='completed',path=str(path),finished_at=time.time(),bytes=path.stat().st_size)
+            with self.lock:
+                self.job.update(status='completed',path=str(path),finished_at=time.time(),bytes=path.stat().st_size)
+                if self.job['kind']=='automatica':self.job.update(automatic_started_at=self.job['started_at'],automatic_finished_at=self.job['finished_at'],automatic_path=str(path))
             pointer=self.directory/'ultimo.tmp';pointer.write_text(json.dumps(self.snapshot(),ensure_ascii=False,indent=2),encoding='utf-8');os.replace(pointer,self.directory/'ultimo.json')
         except Exception as e:
             with self.lock:self.job.update(status='failed',error=str(e))
@@ -248,7 +251,12 @@ class ExportManager:
             thread.join()
 
 EXPORTER=ExportManager()
-DEEP.on_finished=lambda:EXPORTER.request('automatica')
+def study_finished():
+    with LOCK:
+        STATE['running']=False
+        STATE['stage']='Studio terminato' if DEEP.state['status']=='completed' else 'Studio salvato'
+    EXPORTER.request('automatica')
+DEEP.on_finished=study_finished
 
 class Handler(BaseHTTPRequestHandler):
     def send(self,code,data,kind='application/json'):

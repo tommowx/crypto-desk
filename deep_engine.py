@@ -3,6 +3,9 @@ from itertools import product
 import random
 from batch_engine import prepare,evaluate
 VERSION='deep-1'
+EXTENDED_VERSION='deep-2-intensive'
+RULES_PER_ROUND=250_000
+EVALUATIONS_PER_COIN=RULES_PER_ROUND*16
 
 def deep_configs():
     base=[];stops=[i/200 for i in range(1,21)]
@@ -12,6 +15,36 @@ def deep_configs():
         base.append(dict(strategy='breakout',lookback=lookback,exit_ma=exit_ma,stop=stop))
     random.Random(42103).shuffle(base)
     return [dict(c,cost=cost) for c in base[:12500] for cost in ('base','stress')]
+
+def extended_configs(round_number=0,rules_per_round=RULES_PER_ROUND):
+    """Disjoint deterministic parameter blocks; original indices remain stable."""
+    import math
+    legacy=deep_configs();base=legacy[::2]
+    key=lambda c:(c['strategy'],c.get('fast'),c.get('slow'),c.get('lookback'),c.get('exit_ma'),c['stop'])
+    existing={key(c) for c in base};extra=rules_per_round-len(base)
+    if extra<1:raise ValueError('Il nuovo blocco deve aggiungere regole oltre quelle originali')
+    trend_size=96*300*40;domain=trend_size+96*96*40
+    multiplier=104729
+    while math.gcd(multiplier,domain)!=1:multiplier+=2
+    offset=round_number*extra;seen=0;chosen=[]
+    for i in range(domain):
+        code=(i*multiplier+61703)%domain
+        strategy='trend' if code<trend_size else 'breakout'
+        code=code if strategy=='trend' else code-trend_size
+        stop=(code%40+1)/400;code//=40
+        second=code%(300 if strategy=='trend' else 96);first=code//(300 if strategy=='trend' else 96)
+        c=dict(strategy=strategy,stop=stop)
+        c.update(dict(fast=first+5,slow=second+101) if strategy=='trend' else dict(lookback=first+5,exit_ma=second+5))
+        if key(c) in existing:continue
+        if seen>=offset:chosen.append(c)
+        seen+=1
+        if len(chosen)>=extra:break
+    if not chosen:raise ValueError('Spazio di regole completato: occorre un nuovo storico per altri studi')
+    return legacy+[dict(c,cost=cost) for c in chosen for cost in ('base','stress')]
+
+def decode_result(payload):
+    import json,zlib
+    return json.loads(zlib.decompress(payload) if isinstance(payload,bytes) else payload)
 
 def windows(n):
     if n<1000: raise ValueError('Storico insufficiente per la ricerca approfondita')
@@ -50,13 +83,26 @@ def rule_key(config):
 
 def run_cached_chunk(pair,indexed_configs):
     from batch_engine import signal_arrays
+    from collections import OrderedDict
+    from array import array
+    compact=lambda values:array('d',(float('nan') if v is None else v for v in values))
     d=_DATASETS[pair];rows=d['rows']
     if pair not in _PREPARED:
-        _PREPARED[pair]=prepare(rows,sorted(set(range(5,101,5))|set(range(110,301,10))),list(range(5,101,5)))
+        closes,av,high=prepare(rows,[5],[5]);_PREPARED[pair]=(closes,OrderedDict((n,compact(v)) for n,v in av.items()),OrderedDict((n,compact(v)) for n,v in high.items()))
     prepared=_PREPARED[pair];result=[]
     for index,c in indexed_configs:
         key=(pair,rule_key(c))
         if key not in _SIGNALS:
+            av={c['fast'],c['slow']} if c['strategy']=='trend' else {c['exit_ma']}
+            high={c['lookback']} if c['strategy']=='breakout' else set()
+            missing_av=av-set(prepared[1]);missing_high=high-set(prepared[2])
+            if missing_av or missing_high:
+                _,new_av,new_high=prepare(rows,sorted(missing_av) or [5],sorted(missing_high) or [5])
+                prepared[1].update((n,compact(v)) for n,v in new_av.items());prepared[2].update((n,compact(v)) for n,v in new_high.items())
+            for n in av:prepared[1].move_to_end(n)
+            for n in high:prepared[2].move_to_end(n)
+            while len(prepared[1])>64:prepared[1].popitem(last=False)
+            while len(prepared[2])>16:prepared[2].popitem(last=False)
             _SIGNALS[key]=signal_arrays(rows,c,prepared)
             if len(_SIGNALS)>64:_SIGNALS.popitem(last=False)
         _SIGNALS.move_to_end(key);signals=_SIGNALS[key];folds=[]
@@ -90,7 +136,7 @@ def system_resources():
 def worker_budget():
     r=system_resources();cpu=max(1,r['logical_cpus']-2)
     # Leave memory for Windows, the dashboard and SQLite; indicators are reused per worker.
-    memory=max(1,int((r['available_memory']-768*1024**2)//(320*1024**2))) if r['available_memory'] else cpu
+    memory=max(1,int((r['available_memory']-768*1024**2)//(192*1024**2))) if r['available_memory'] else cpu
     return max(1,min(cpu,memory,12))
 
 def learned_signal(rows,config):

@@ -21,7 +21,7 @@ I test dell'updater si eseguono con `python -m unittest discover -s tests`. I te
 Il repository contiene solo codice, documentazione e pacchetto pubblico. Non aggiungere `data/`, report, log, cache, chiavi o credenziali.
 
 
-## Versione 0.9.3
+## Versione 0.10.0
 
 Ricerca con indicatori persistenti nei processi e segnali riutilizzati; numero
 processi scelto in base a CPU e RAM disponibili. Portafoglio storico continuo,
@@ -33,3 +33,16 @@ Il messaggio FATTO richiede ricerca terminata e nuova esportazione completata.
 Il grafico distingue la riproduzione di un test dal lavoro del motore.
 
 Verifiche: python -m unittest discover -s tests -q; node tests/test_ui.cjs.
+
+
+## Versione 0.10.0: studio intensivo
+
+250.000 regole per blocco completo, costi base e stress, quattro fold e due
+finestre: 4 milioni di valutazioni per asset. Gli indici originali restano
+stabili e i risultati del vecchio motore vengono importati come resumed.
+Nuovi blocchi usano una permutazione affine biettiva e intervalli disgiunti
+nello spazio dei parametri. Cache indicatori limitata, maschere riutilizzate,
+risultati SQLite compressi con zlib. Il vecchio holdout viene escluso, poiche
+e gia stato osservato: le nuove regole non vengono promosse al paper.
+FATTO richiede nuove valutazioni, worker terminato, replay completo, paper
+fermato e nuova esportazione automatica completata.

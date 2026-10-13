@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "version": "0.9.3",
-  "file": "crypto-desk-0.9.3.zip",
-  "url": "https://raw.githubusercontent.com/tommowx/crypto-desk/main/releases/crypto-desk-0.9.3.zip",
-  "sha256": "1a869bc39cb55100e6e6749a2ed22e8489da9152cda8a58826530f3c1b283b80"
+  "version": "0.10.0",
+  "file": "crypto-desk-0.10.0.zip",
+  "url": "https://raw.githubusercontent.com/tommowx/crypto-desk/main/releases/crypto-desk-0.10.0.zip",
+  "sha256": "e0162f5f545b3442cc6cdfc57af33ef84178a0f708ccf4ecbf17040d4bab7b0f"
 }
