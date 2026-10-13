@@ -40,7 +40,7 @@ class DeepLab:
             if out['status']=='idle': out['total']=out['coin_count']*200_000
             if out['status'] in ('running','cancelling'): out['elapsed']=round(time.monotonic()-self.started,1)
             out['evaluations_per_second']=round(max(0,out['done']-out.get('resumed',0))/max(.01,out['elapsed']),1)
-            out['active_workers']=out.get('workers',0) if out['worker_alive'] else 0
+            out['active_workers']=out.get('busy_workers',0) if out['worker_alive'] else 0
             return out
     def active(self): return self.snapshot()['status'] in ('running','cancelling')
     def select(self,count):
@@ -150,6 +150,7 @@ class DeepLab:
                         job=next(tasks,None)
                         if job is None: exhausted=True;break
                         pair,group=job;pending.add(pool.submit(run_cached_chunk,pair,group))
+                    with self.lock:self.state['busy_workers']=min(workers,len(pending))
                     if not pending: break
                     finished,_=wait(pending,timeout=.25,return_when=FIRST_COMPLETED)
                     for future in finished:
@@ -193,7 +194,7 @@ class DeepLab:
                          resumed_evaluations=resumed,new_evaluations=len(keys)*8-resumed,all_four_positive=positive,parameter_coin_cost_results=len(keys),
                          input_sha256=fingerprint,elapsed_session_seconds=round(time.monotonic()-self.started,1),datasets=self.state['datasets'],top=top,walk_forward=walk,
                          full_results_file='checkpoint.sqlite3',methodology='12,500 rules x 2 costs x N selected coins x 4 folds x 2 windows = 200,000 evaluations per coin, not independent strategies. 24 full months Binance spot USDT, not Kraken EUR. Rolling earlier 40% training -> next 10% test, four periods, last 20% excluded. Train-only selection: return minus 0.5*drawdown, at least 20 trades. Top ranking uses test windows and is exploratory. Each window starts with 1000 USDT, 20% allocation. No combined portfolio, historical spread, delisted coins, taxes or 5% entry halt. All results stored in SQLite. No automatic strategy promotion. Repeated inspection is not independent validation.')
-            summary.update(application_version='0.9.1',workers=workers,chunk_size=32,validation=validation,
+            summary.update(application_version='0.9.2',workers=workers,chunk_size=32,validation=validation,
                            methodology='Development: first 80%, four rolling folds. One rule per asset frozen from last training fold using return minus 0.5*drawdown and at least 20 trades. Final 20% checked once for base and stressed costs; repeated identical checks reuse saved validation. Experimental continuous portfolio includes rejected rules and is visibly separate from approved paper rules. Maximum two positions, 20% per entry, next-open execution. No leverage or real orders. Cash conservation alone is not a pass.')
             tmp.write_text(json.dumps(summary,ensure_ascii=False,allow_nan=False),encoding='utf-8');os.replace(tmp,report)
             with self.lock: self.state.update(status=status,phase='Completato' if complete else 'Salvato: Avvia / Riprendi per continuare',report=str(report),progress_at=time.time())
@@ -204,6 +205,7 @@ class DeepLab:
         finally:
             if db is not None: db.close()
             with self.lock:
+                self.state['busy_workers']=0
                 self.state['elapsed']=round(time.monotonic()-self.started,1)
                 saved=dict(self.state)
             try:

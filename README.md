@@ -21,7 +21,7 @@ I test dell'updater si eseguono con `python -m unittest discover -s tests`. I te
 Il repository contiene solo codice, documentazione e pacchetto pubblico. Non aggiungere `data/`, report, log, cache, chiavi o credenziali.
 
 
-## Versione 0.9.1
+## Versione 0.9.2
 
 Ricerca con indicatori persistenti nei processi e segnali riutilizzati; numero
 processi scelto in base a CPU e RAM disponibili. Portafoglio storico continuo,

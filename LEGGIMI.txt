@@ -1,6 +1,8 @@
-CRYPTO DESK 0.9.1
+CRYPTO DESK 0.9.2
 
 Apri sempre l'icona Crypto Desk sul desktop.
+All'apertura l'app resta in attesa: non avvia ricerca, simulazione o replay.
+Il messaggio FATTO non viene riproposto per lo studio di una vecchia apertura.
 Premi Inizia ad imparare: ricerca storica e simulazione partono insieme.
 Il grafico riproduce saldi e operazioni effettivamente calcolati; la scritta
 REPLAY ACCELERATO indica la riproduzione di un test gia calcolato.

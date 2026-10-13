@@ -13,6 +13,10 @@ def dataset():
  return dict(pair='TESTUSDT',symbol='TEST/USDT',rows=rows)
 
 class HistoricalTests(unittest.TestCase):
+ def test_saved_completion_does_not_start_work(self):
+  with tempfile.TemporaryDirectory() as tmp:
+   Path(tmp,'last_session.json').write_text(json.dumps(dict(status='completed',done=1000000,arena=dict(points=[dict(time=1,equity=1000)],trades=[]))))
+   lab=DeepLab(tmp);self.assertFalse(lab.snapshot()['worker_alive']);self.assertFalse(lab.active())
  def test_cached_results_equal_original(self):
   d=dataset();configs=[]
   for strategy in ('trend','breakout'):
