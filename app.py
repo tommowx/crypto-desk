@@ -11,7 +11,7 @@ DATA=Path(os.environ.get('CRYPTO_DESK_DATA',str(ROOT/'data'))); DATA.mkdir(paren
 LAB=BatchLab(DATA); DEEP=DeepLab(DATA)
 STOP_EVENT=threading.Event()
 LOCK=threading.RLock(); TOKEN=secrets.token_urlsafe(24); PORT=8877
-VERSION="0.9.2"; MAX_QUOTE_AGE=180
+VERSION="0.9.3"; MAX_QUOTE_AGE=180
 ROLES=['Scanner','Selezionatore','Analista','Critico','Rischio','Simulatore']
 STATE={'session_started_at':None,'busy':False,'running':False,'stage':'Pronto','updated':None,'quotes_at':None,'warnings':[],'market':[],'analyses':{},'logs':[],'roles':{r:'In attesa' for r in ROLES},'error':None}
 ROLE_ACTIVITY={r:dict(events=0,last_at=None) for r in ROLES}
