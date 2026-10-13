@@ -7,7 +7,8 @@ const sample={portfolio:{positions:{},trades:[],halted:false},equity:1000,stale:
 async function refresh(){await vm.runInContext('refresh()',context)}
 (async()=>{
  context.fetch=async()=>({ok:true,json:async()=>structuredClone(sample)});await refresh();
- assert.match(elements.status.textContent,/Premi Avvia ricerca automatica/);assert.equal(elements.start.disabled,false);
+ assert.equal(elements.deepStatus.textContent,'Pronto');assert.match(elements.deepStart.textContent,/Avvia ricerca automatica/);assert.equal(elements.start.disabled,false);
+ sample.deep={status:'running',done:0,total:1000};context.fetch=async()=>({ok:true,json:async()=>structuredClone(sample)});await refresh();assert.match(elements.profitChart.innerHTML,/activityWave/);assert.match(elements.profitChart.innerHTML,/senza prezzi simulati/);sample.deep={status:'idle'};
  context.fetch=async()=>{throw Error('offline')};await refresh();assert.match(elements.status.textContent,/Motore non raggiungibile/);assert.equal(elements.start.disabled,true);
  context.fetch=async()=>({ok:false,status:503});await refresh();assert.match(elements.status.textContent,/HTTP 503/);
  context.fetch=async()=>({ok:true,json:async()=>({})});await refresh();assert.match(elements.status.textContent,/Risposta non valida/);

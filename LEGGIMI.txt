@@ -1,4 +1,4 @@
-CRYPTO DESK 0.8 - AVVIO SEMPLICE
+CRYPTO DESK 0.8.1 - PANORAMICA PIU SEMPLICE
 
 INSTALLAZIONE / AGGIORNAMENTO
 Apri Crypto_Desk_Installa.cmd. Richiede Python 3.10+ gia installato.

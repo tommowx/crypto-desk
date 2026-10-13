@@ -10,7 +10,7 @@ DATA=Path(os.environ.get('CRYPTO_DESK_DATA',str(ROOT/'data'))); DATA.mkdir(paren
 LAB=BatchLab(DATA); DEEP=DeepLab(DATA)
 STOP_EVENT=threading.Event()
 LOCK=threading.RLock(); TOKEN=secrets.token_urlsafe(24); PORT=8877
-VERSION="0.8"; MAX_QUOTE_AGE=180
+VERSION="0.8.1"; MAX_QUOTE_AGE=180
 ROLES=['Scanner','Selezionatore','Analista','Critico','Rischio','Simulatore']
 STATE={'busy':False,'running':False,'stage':'Pronto','updated':None,'quotes_at':None,'warnings':[],'market':[],'analyses':{},'logs':[],'roles':{r:'In attesa' for r in ROLES},'error':None}
 BOOK={'cash':1000.,'positions':{},'trades':[],'seen':{},'peak':1000.,'halted':False}
@@ -162,6 +162,13 @@ class Handler(BaseHTTPRequestHandler):
             STOP_EVENT.set();LAB.stop();DEEP.stop()
             self.send(200,{'ok':True})
             threading.Thread(target=self.server.shutdown,daemon=True).start()
+            def close_window_after_response():
+                time.sleep(.25)
+                try:
+                    from desktop_window import close_window
+                    close_window(DATA)
+                except Exception: pass
+            threading.Thread(target=close_window_after_response,daemon=True).start()
             return
         if STATE.get('closing'): return self.send(409,{'error':'Chiusura in corso'})
         if self.path.startswith('/api/deep/plan/'):
