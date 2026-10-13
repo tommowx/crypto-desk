@@ -10,7 +10,7 @@ DATA=Path(os.environ.get('CRYPTO_DESK_DATA',str(ROOT/'data'))); DATA.mkdir(paren
 LAB=BatchLab(DATA); DEEP=DeepLab(DATA)
 STOP_EVENT=threading.Event()
 LOCK=threading.RLock(); TOKEN=secrets.token_urlsafe(24); PORT=8877
-VERSION="0.8.2"; MAX_QUOTE_AGE=180
+VERSION="0.8.3"; MAX_QUOTE_AGE=180
 ROLES=['Scanner','Selezionatore','Analista','Critico','Rischio','Simulatore']
 STATE={'busy':False,'running':False,'stage':'Pronto','updated':None,'quotes_at':None,'warnings':[],'market':[],'analyses':{},'logs':[],'roles':{r:'In attesa' for r in ROLES},'error':None}
 BOOK={'cash':1000.,'positions':{},'trades':[],'seen':{},'peak':1000.,'halted':False}
@@ -259,3 +259,4 @@ if __name__=='__main__':
         for job in (LAB,DEEP):
             thread=getattr(job,'thread',None)
             if thread is not None: thread.join()
+
