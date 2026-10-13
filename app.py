@@ -1,4 +1,4 @@
-import json, os, threading, time, secrets, webbrowser
+import json, os, threading, time, secrets, webbrowser, io, sqlite3, tempfile, zipfile
 from pathlib import Path
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse
@@ -10,7 +10,7 @@ DATA=Path(os.environ.get('CRYPTO_DESK_DATA',str(ROOT/'data'))); DATA.mkdir(paren
 LAB=BatchLab(DATA); DEEP=DeepLab(DATA)
 STOP_EVENT=threading.Event()
 LOCK=threading.RLock(); TOKEN=secrets.token_urlsafe(24); PORT=8877
-VERSION="0.8.1"; MAX_QUOTE_AGE=180
+VERSION="0.8.2"; MAX_QUOTE_AGE=180
 ROLES=['Scanner','Selezionatore','Analista','Critico','Rischio','Simulatore']
 STATE={'busy':False,'running':False,'stage':'Pronto','updated':None,'quotes_at':None,'warnings':[],'market':[],'analyses':{},'logs':[],'roles':{r:'In attesa' for r in ROLES},'error':None}
 BOOK={'cash':1000.,'positions':{},'trades':[],'seen':{},'peak':1000.,'halted':False}
@@ -136,6 +136,36 @@ def snapshot():
         out['unpriced']=[k for k in BOOK['positions'] if k not in {m['pair'] for m in STATE['market']}]
         return out
 
+def export_all():
+    """Create one portable archive of the portfolio, research outputs and their inputs."""
+    out=io.BytesIO()
+    with zipfile.ZipFile(out,'w',compression=zipfile.ZIP_DEFLATED,compresslevel=6) as archive:
+        current=snapshot();current.pop('token',None)
+        archive.writestr('Crypto_Desk/stato.json',json.dumps(current,ensure_ascii=False,indent=2))
+        archive.writestr('Crypto_Desk/LEGGIMI.txt','Esportazione completa di Crypto Desk. Contiene stato e portafoglio simulato, eventi, piani e dati storici scaricati, report e risultati dettagliati. Nessun ordine reale.\n')
+        for name in ('portfolio.json','events.jsonl','deep_plan.json'):
+            path=DATA/name
+            if path.is_file():archive.write(path,'Crypto_Desk/'+name,compress_type=zipfile.ZIP_DEFLATED)
+        for folder,patterns in ((DATA/'deep_plans',('*',)),(DATA/'history_binance',('*',)),(DATA/'research',('*.json',)),(DATA/'deep_research',('**/manifest.json','**/report.json'))):
+            if not folder.is_dir():continue
+            files=set()
+            for pattern in patterns:files.update(folder.glob(pattern))
+            if folder.name=='deep_research':files.update(folder.rglob('checkpoint.sqlite3'))
+            for path in sorted(files):
+                if not path.is_file() or path.name.endswith(('.tmp','.CHECKSUM.tmp')):continue
+                rel=path.relative_to(DATA).as_posix();dest='Crypto_Desk/dati/'+rel
+                if path.name=='checkpoint.sqlite3':
+                    with tempfile.TemporaryDirectory(prefix='cryptodesk-export-') as temp:
+                        copy=Path(temp)/'checkpoint.sqlite3'
+                        src=sqlite3.connect(path.resolve().as_uri()+'?mode=ro',uri=True,timeout=10);dst=sqlite3.connect(copy)
+                        try:src.backup(dst)
+                        finally:dst.close();src.close()
+                        archive.write(copy,dest,compress_type=zipfile.ZIP_DEFLATED)
+                else:
+                    kind=zipfile.ZIP_STORED if path.suffix.lower()=='.zip' else zipfile.ZIP_DEFLATED
+                    archive.write(path,dest,compress_type=kind)
+    return out.getvalue()
+
 class Handler(BaseHTTPRequestHandler):
     def send(self,code,data,kind='application/json'):
         raw=data if isinstance(data,bytes) else json.dumps(data,ensure_ascii=False).encode()
@@ -153,6 +183,7 @@ class Handler(BaseHTTPRequestHandler):
             try: return self.send(200,LAB.export())
             except ValueError as e: return self.send(409,{'error':str(e)})
         if route=='/api/export': return self.send(200,snapshot())
+        if route=='/api/export/all': return self.send(200,export_all(),'application/zip')
         self.send(404,{'error':'Non trovato'})
     def do_POST(self):
         if not self.allowed() or self.headers.get('X-Desk-Token')!=TOKEN: return self.send(403,{'error':'Richiesta non autorizzata'})
