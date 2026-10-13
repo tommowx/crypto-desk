@@ -5,14 +5,17 @@ from urllib.parse import urlparse
 from batch_jobs import BatchLab
 from deep_jobs import DeepLab
 from engine import api, candles, shortlist, research, signal, FEE, SLIP
+from deep_engine import system_resources,learned_signal
 ROOT=Path(__file__).resolve().parent
 DATA=Path(os.environ.get('CRYPTO_DESK_DATA',str(ROOT/'data'))); DATA.mkdir(parents=True,exist_ok=True)
 LAB=BatchLab(DATA); DEEP=DeepLab(DATA)
 STOP_EVENT=threading.Event()
 LOCK=threading.RLock(); TOKEN=secrets.token_urlsafe(24); PORT=8877
-VERSION="0.8.5"; MAX_QUOTE_AGE=180
+VERSION="0.9.0"; MAX_QUOTE_AGE=180
 ROLES=['Scanner','Selezionatore','Analista','Critico','Rischio','Simulatore']
 STATE={'busy':False,'running':False,'stage':'Pronto','updated':None,'quotes_at':None,'warnings':[],'market':[],'analyses':{},'logs':[],'roles':{r:'In attesa' for r in ROLES},'error':None}
+ROLE_ACTIVITY={r:dict(events=0,last_at=None) for r in ROLES}
+WORKER_THREAD=None
 BOOK={'cash':1000.,'positions':{},'trades':[],'seen':{},'peak':1000.,'halted':False}
 if (DATA/'portfolio.json').exists():
     try: BOOK.update(json.loads((DATA/'portfolio.json').read_text(encoding='utf-8')))
@@ -25,6 +28,7 @@ def log(role,message):
     with LOCK:
         entry={'time':time.time(),'role':role,'text':message}; STATE['logs'].insert(0,entry); STATE['logs']=STATE['logs'][:250]
         STATE['roles'][role]=message
+        if role in ROLE_ACTIVITY:ROLE_ACTIVITY[role].update(events=ROLE_ACTIVITY[role]['events']+1,last_at=entry['time'])
         with (DATA/'events.jsonl').open('a',encoding='utf-8') as f: f.write(json.dumps(entry,ensure_ascii=False)+'\n')
 
 def equity(market):
@@ -43,7 +47,7 @@ def paper(market, analyses, quotes_at):
             m=lookup.get(k)
             if not m: log('Rischio',f'{k}: quotazione assente; posizione non valutabile in tempo reale'); continue
             p['mark']=m['bid']; a=analyses.get(k)
-            reason='Stop 3% rilevato al controllo' if m['bid']<=p['stop'] else ('Segnale terminato' if a and not a['signal'] else None)
+            reason='Stop della posizione rilevato al controllo' if m['bid']<=p['stop'] else ('Segnale terminato' if a and a.get('exit_signal',not a['signal']) else None)
             if reason:
                 fill=m['bid']*(1-SLIP); gross=p['qty']*fill; net=gross*(1-FEE); BOOK['cash']+=net
                 BOOK['trades'].append({'time':time.time(),'symbol':m['symbol'],'side':'SELL','price':fill,'qty':p['qty'],'fee':gross*FEE,'pnl':net-p['cost'],'reason':reason})
@@ -66,7 +70,7 @@ def paper(market, analyses, quotes_at):
                 spend=min(eq*.20,BOOK['cash']); fill=m['ask']*(1+SLIP)
                 if spend<10: continue
                 qty=spend/(fill*(1+FEE)); BOOK['cash']-=spend
-                BOOK['positions'][k]={'symbol':m['symbol'],'qty':qty,'entry':fill,'mark':m['bid'],'cost':spend,'stop':fill*.97,'time':time.time()}
+                BOOK['positions'][k]={'symbol':m['symbol'],'qty':qty,'entry':fill,'mark':m['bid'],'cost':spend,'stop':fill*(1-(a.get('rule') or {}).get('stop',.03)),'time':time.time(),'rule':a.get('rule')}
                 BOOK['trades'].append({'time':time.time(),'symbol':m['symbol'],'side':'BUY','price':fill,'qty':qty,'fee':qty*fill*FEE,'pnl':None,'reason':a['reason']})
                 log('Simulatore',f"Entrata virtuale {m['symbol']}: €{spend:.2f}")
         persist()
@@ -82,7 +86,9 @@ def cycle():
         quotes_at=time.time()
         with LOCK:
             STATE['market']=market; STATE['quotes_at']=quotes_at
-        chosen=[m for m in market if m['eligible']][:5]
+        policies=read_policies()
+        approved={r['symbol'].split('/')[0]:r for r in (policies or {}).get('approved',[])}
+        chosen=[m for m in market if m['eligible'] and m['symbol'].split('/')[0] in approved] if policies else [m for m in market if m['eligible']][:5]
         with LOCK: held=set(BOOK['positions'])
         chosen += [m for m in market if m['pair'] in held and m not in chosen]
         log('Selezionatore',f'{len(market)} crypto controllate; {len(chosen)} da approfondire per volume e spread. Non è una previsione.')
@@ -91,8 +97,14 @@ def cycle():
             with LOCK: STATE['stage']='Analisi '+m['symbol']
             log('Analista','Candele orarie chiuse: '+m['symbol'])
             try:
-                rows=candles(m['pair']); wanted,why=signal(rows)
-                analyses[m['pair']]={'symbol':m['symbol'],'rows':rows,'signal':wanted,'reason':why,'tests':research(rows)}
+                rows=candles(m['pair']);rule=approved.get(m['symbol'].split('/')[0],{}).get('config')
+                held_rule=BOOK['positions'].get(m['pair'],{}).get('rule')
+                rule=held_rule or rule
+                if rule:wanted,leave,why=learned_signal(rows,rule)
+                else:wanted,why=signal(rows);leave=not wanted
+                # Existing positions retain their original exit rules; unapproved assets cannot enter.
+                if policies and not held_rule and m['symbol'].split('/')[0] not in approved:wanted=False
+                analyses[m['pair']]={'symbol':m['symbol'],'rows':rows,'signal':wanted,'exit_signal':leave,'rule':rule,'reason':why,'tests':research(rows)}
                 log('Critico',m['symbol']+': storico di circa 30 giorni; test preliminare, nessuna validazione per soldi reali.')
             except Exception as e:
                 message=m['symbol']+': analisi scartata — '+str(e)
@@ -114,6 +126,8 @@ def cycle():
             else: log('Simulatore','In pausa: analisi aggiornata, nessuna operazione')
         log('Rischio','Solo spot simulato. Massimo 2 posizioni, 20% ciascuna; commissione ipotizzata 0,40% e slippage 0,10% per lato.')
         with LOCK: STATE['stage']='Ciclo completato'
+        if policies and not approved:log('Simulatore','Nessuna regola ha superato la verifica finale: osservazione attiva, allenamento storico disponibile')
+        elif not any(a['signal'] for a in analyses.values()):log('Simulatore','In attesa di un segnale: nessun ingresso conforme alle regole')
     except Exception as e:
         with LOCK: STATE['error']=str(e); STATE['stage']='Errore dati: nessuna nuova operazione'
         log('Scanner','Errore: '+str(e))
@@ -126,27 +140,54 @@ def worker():
         if run: cycle()
         STOP_EVENT.wait(60)
 
+def read_policies():
+    path=DATA/'learned_rules.json'
+    if not path.is_file():return None
+    try:
+        policy=json.loads(path.read_text(encoding='utf-8'))
+        if policy.get('schema')!=1 or not isinstance(policy.get('approved'),list):raise ValueError('Regole non valide')
+        return policy
+    except (OSError,ValueError):return {'approved':[],'error':'Regole apprese non leggibili: ingressi sospesi'}
+
+def module_audit(deep):
+    arena=deep.get('arena') or {};validation=deep.get('validation',[])
+    active=deep.get('worker_alive') and deep.get('status') in ('running','cancelling')
+    tasks={
+        'Scanner':('Dati integri e aggiornati',f"{deep.get('download_done',0)} / {deep.get('download_total',0)} archivi",'errore' if STATE['error'] else 'attivo' if active and deep.get('download_done',0)<deep.get('download_total',0) else 'verificato'),
+        'Selezionatore':('Regole scelte sullo sviluppo',f"{len(validation)} candidate · {len(deep.get('approved',[]))} approvate",'in attesa' if not validation else 'verificato'),
+        'Analista':('Calcolo delle strategie',f"{deep.get('done',0):,} valutazioni".replace(',','.'),'attivo' if active else 'completato' if deep.get('status')=='completed' else 'in pausa'),
+        'Critico':('Verifica separata e costi stress',f"{len(validation)} regole controllate",'verificato' if validation else 'in attesa'),
+        'Rischio':('Costi, capitale e perdite',f"Perdita dal picco {arena.get('drawdown_pct',0):.1f}%",'verificato' if arena else 'in attesa'),
+        'Simulatore':('Portafoglio storico e paper',f"{arena.get('trade_count',0)} operazioni storiche",'attivo' if STATE['busy'] or active else 'in attesa del segnale' if STATE['running'] else 'in pausa')}
+    return {role:dict(task=t[0],result=t[1],status=t[2],**ROLE_ACTIVITY[role]) for role,t in tasks.items()}
+
 def snapshot():
     with LOCK:
         out=json.loads(json.dumps(STATE)); out['portfolio']=json.loads(json.dumps(BOOK)); out['equity']=equity(STATE['market'])
         out['batch']=LAB.snapshot(); out['deep']=DEEP.snapshot()
         out['token']=TOKEN; out['version']=VERSION
+        out['resources']=system_resources();out['resources'].update(workers=out['deep'].get('active_workers',0),configured_workers=out['deep'].get('workers',0),evaluations_per_second=out['deep'].get('evaluations_per_second',0),gpu_used=False)
+        out['module_audit']=module_audit(out['deep'])
+        out['simulator_alive']=bool(WORKER_THREAD and WORKER_THREAD.is_alive())
+        out['export_info']=EXPORTER.snapshot()
+        out['learned_rules']=read_policies()
         age=time.time()-STATE['quotes_at'] if STATE['quotes_at'] is not None else float('inf')
         out['stale']=not 0 <= age <= MAX_QUOTE_AGE or bool(STATE['error'])
         out['unpriced']=[k for k in BOOK['positions'] if k not in {m['pair'] for m in STATE['market']}]
         return out
 
-def export_all():
+def export_all(destination=None):
     """Create one portable archive of the portfolio, research outputs and their inputs."""
-    out=io.BytesIO()
-    with zipfile.ZipFile(out,'w',compression=zipfile.ZIP_DEFLATED,compresslevel=6) as archive:
+    out=destination if destination is not None else io.BytesIO()
+    with zipfile.ZipFile(out,'w',compression=zipfile.ZIP_DEFLATED,compresslevel=1) as archive:
         current=snapshot();current.pop('token',None)
+        current['exported_at']=time.time();current['export_scope']='Risultati completati e checkpoint coerenti al momento della copia; la ricerca può continuare.'
         archive.writestr('Crypto_Desk/stato.json',json.dumps(current,ensure_ascii=False,indent=2))
         archive.writestr('Crypto_Desk/LEGGIMI.txt','Esportazione completa di Crypto Desk. Contiene stato e portafoglio simulato, eventi, piani e dati storici scaricati, report e risultati dettagliati. Nessun ordine reale.\n')
-        for name in ('portfolio.json','events.jsonl','deep_plan.json'):
+        for name in ('portfolio.json','events.jsonl','deep_plan.json','last_session.json','learned_rules.json'):
             path=DATA/name
             if path.is_file():archive.write(path,'Crypto_Desk/'+name,compress_type=zipfile.ZIP_DEFLATED)
-        for folder,patterns in ((DATA/'deep_plans',('*',)),(DATA/'history_binance',('*',)),(DATA/'research',('*.json',)),(DATA/'deep_research',('**/manifest.json','**/report.json'))):
+        for folder,patterns in ((DATA/'deep_plans',('*',)),(DATA/'history_binance',('*',)),(DATA/'research',('*.json',)),(DATA/'deep_research',('**/manifest.json','**/report.json','**/validation.json'))):
             if not folder.is_dir():continue
             files=set()
             for pattern in patterns:files.update(folder.glob(pattern))
@@ -164,7 +205,50 @@ def export_all():
                 else:
                     kind=zipfile.ZIP_STORED if path.suffix.lower()=='.zip' else zipfile.ZIP_DEFLATED
                     archive.write(path,dest,compress_type=kind)
-    return out.getvalue()
+    return out.getvalue() if destination is None else destination
+
+class ExportManager:
+    def __init__(self):
+        self.lock=threading.RLock();self.thread=None;self.pending_automatic=False
+        self.directory=Path(os.environ.get('CRYPTO_DESK_EXPORT_DIR',str(Path.home()/'Documents'/'Crypto Desk'/'Esportazioni')))
+        self.job=dict(status='idle',path=None,error=None)
+        try:
+            if (self.directory/'ultimo.json').is_file():self.job=json.loads((self.directory/'ultimo.json').read_text(encoding='utf-8'))
+        except (OSError,ValueError):pass
+    def snapshot(self):
+        with self.lock:return dict(self.job,directory=str(self.directory))
+    def request(self,kind='manuale'):
+        with self.lock:
+            if self.thread and self.thread.is_alive():
+                if kind=='automatica':self.pending_automatic=True
+                return dict(self.job)
+            self.job=dict(status='saving',kind=kind,started_at=time.time(),path=None,error=None)
+            self.thread=threading.Thread(target=self._save,daemon=False);self.thread.start()
+            return dict(self.job)
+    def _save(self):
+        temp=None
+        try:
+            self.directory.mkdir(parents=True,exist_ok=True)
+            name='Crypto_Desk_'+time.strftime('%Y-%m-%d_%H-%M-%S')+'_'+secrets.token_hex(2)+'.zip'
+            path=self.directory/name;temp=path.with_suffix('.zip.tmp')
+            export_all(temp);os.replace(temp,path)
+            with self.lock:self.job.update(status='completed',path=str(path),finished_at=time.time(),bytes=path.stat().st_size)
+            pointer=self.directory/'ultimo.tmp';pointer.write_text(json.dumps(self.snapshot(),ensure_ascii=False,indent=2),encoding='utf-8');os.replace(pointer,self.directory/'ultimo.json')
+        except Exception as e:
+            with self.lock:self.job.update(status='failed',error=str(e))
+            if temp and temp.exists():temp.unlink()
+        finally:
+            with self.lock:
+                again=self.pending_automatic;self.pending_automatic=False;self.thread=None
+                if again:self.request('automatica')
+    def wait(self):
+        while True:
+            with self.lock:thread=self.thread
+            if thread is None:return
+            thread.join()
+
+EXPORTER=ExportManager()
+DEEP.on_finished=lambda:EXPORTER.request('automatica')
 
 class Handler(BaseHTTPRequestHandler):
     def send(self,code,data,kind='application/json'):
@@ -176,6 +260,7 @@ class Handler(BaseHTTPRequestHandler):
         route=urlparse(self.path).path
         if route=='/': return self.send(200,(ROOT/'index.html').read_bytes(),'text/html')
         if route=='/api/state': return self.send(200,snapshot())
+        if route=='/api/export/status':return self.send(200,EXPORTER.snapshot())
         if route=='/api/deep/export':
             try: return self.send(200,DEEP.export())
             except ValueError as e: return self.send(409,{'error':str(e)})
@@ -202,6 +287,7 @@ class Handler(BaseHTTPRequestHandler):
             threading.Thread(target=close_window_after_response,daemon=True).start()
             return
         if STATE.get('closing'): return self.send(409,{'error':'Chiusura in corso'})
+        if self.path=='/api/export/start':return self.send(202,EXPORTER.request())
         if self.path.startswith('/api/deep/plan/'):
             try:
                 with LOCK: plan=DEEP.select(int(self.path.rsplit('/',1)[1]))
@@ -242,7 +328,7 @@ if __name__=='__main__':
     try: server=ThreadingHTTPServer(('127.0.0.1',PORT),Handler)
     except OSError: raise SystemExit(f'Porta {PORT} occupata: chiudi la precedente istanza di Crypto Desk o il programma che usa questa porta. Nessun secondo bot avviato.')
     log('Simulatore','Avvio in PAUSA. Solo simulazione, nessuna chiave API richiesta.')
-    threading.Thread(target=worker,daemon=True).start()
+    WORKER_THREAD=threading.Thread(target=worker,daemon=True);WORKER_THREAD.start()
     print(f'Crypto Desk: http://127.0.0.1:{PORT} — Ctrl+C per chiudere')
     if '--no-browser' not in __import__('sys').argv:
         if '--desktop' in __import__('sys').argv:
@@ -259,4 +345,5 @@ if __name__=='__main__':
         for job in (LAB,DEEP):
             thread=getattr(job,'thread',None)
             if thread is not None: thread.join()
+        EXPORTER.wait()
 

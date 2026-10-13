@@ -19,3 +19,17 @@ I test dell'updater si eseguono con `python -m unittest discover -s tests`. I te
 ## Distribuzione
 
 Il repository contiene solo codice, documentazione e pacchetto pubblico. Non aggiungere `data/`, report, log, cache, chiavi o credenziali.
+
+
+## Versione 0.9.0
+
+Ricerca con indicatori persistenti nei processi e segnali riutilizzati; numero
+processi scelto in base a CPU e RAM disponibili. Portafoglio storico continuo,
+segnali causali, esecuzione alla successiva apertura, costi base/stress,
+verifica finale congelata sull'ultimo 20% e promozione condizionata delle regole.
+Esportazione asincrona anche durante la ricerca, copia coerente SQLite,
+salvataggio automatico in Documenti/Crypto Desk/Esportazioni e ultimo.json.
+Il messaggio FATTO richiede ricerca terminata e nuova esportazione completata.
+Il grafico distingue la riproduzione di un test dal lavoro del motore.
+
+Verifiche: python -m unittest discover -s tests -q; node tests/test_ui.cjs.

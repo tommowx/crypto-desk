@@ -36,7 +36,21 @@ def prepare(rows, average_windows=None, high_windows=None):
         highs[n]=values
     return closes,averages,highs
 
-def evaluate(rows,config,start,end,prepared=None,trace=False):
+def signal_arrays(rows,config,prepared):
+    closes,averages,highs=prepared
+    enter=bytearray(len(rows));leave=bytearray(len(rows))
+    for j in range(len(rows)):
+        if config['strategy']=='trend':
+            fast=averages[config['fast']][j];slow=averages[config['slow']][j]
+            enter[j]=fast is not None and slow is not None and closes[j]>fast>slow
+            leave[j]=not enter[j]
+        else:
+            level=highs[config['lookback']][j];ma=averages[config['exit_ma']][j]
+            enter[j]=level is not None and closes[j]>level
+            leave[j]=ma is not None and closes[j]<ma
+    return enter,leave
+
+def evaluate(rows,config,start,end,prepared=None,trace=False,signals=None):
     """Signal i-1, fill at i open; no re-entry on same bar after an exit."""
     closes,averages,highs=prepared or prepare(rows)
     fee,slip=COSTS[config['cost']]
@@ -49,7 +63,9 @@ def evaluate(rows,config,start,end,prepared=None,trace=False):
         net=gross-exit_fee;cash+=net;fees+=exit_fee;trades+=1;wins+=int(net>cost);qty=0.
     for i in range(start,end):
         j=i-1;op,hi,lo,cl=rows[i][1:5]
-        if config['strategy']=='trend':
+        if signals is not None:
+            enter=signals[0][j];leave=signals[1][j]
+        elif config['strategy']=='trend':
             fast=averages[config['fast']][j];slow=averages[config['slow']][j]
             enter=fast is not None and slow is not None and closes[j]>fast>slow
             leave=not enter

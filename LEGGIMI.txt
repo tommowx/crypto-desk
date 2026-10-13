@@ -1,66 +1,35 @@
-CRYPTO DESK 0.8.5 - SCHERMATA ESSENZIALE
+CRYPTO DESK 0.9.0
 
-INSTALLAZIONE / AGGIORNAMENTO
-Apri Crypto_Desk_Installa.cmd. Richiede Python 3.10+ gia installato.
-Non serve estrarre ZIP, scegliere directory o aprire piu programmi.
-La prima volta puoi indicare la cartella data della vecchia versione:
-verra copiata, senza modificare l'originale.
-Poi usa sempre l'icona Crypto Desk sul desktop.
+Apri sempre l'icona Crypto Desk sul desktop.
+Premi Inizia ad imparare: ricerca storica e simulazione partono insieme.
+Il grafico riproduce saldi e operazioni effettivamente calcolati; la scritta
+REPLAY ACCELERATO indica la riproduzione di un test gia calcolato.
+Le fasi, le risorse e i sei moduli mostrano attivita e risultati misurati.
+FATTO compare grande quando lo studio e il salvataggio completo sono finiti.
 
-Apri sempre la stessa icona Crypto Desk. All'avvio l'app controlla GitHub
-e installa automaticamente una versione piu recente, se disponibile.
-Gli aggiornamenti non modificano la cartella data. Se il controllo fallisce,
-Crypto Desk usa la versione locale gia installata.
-Installazione locale senza amministratore in %LOCALAPPDATA%\CryptoDesk.
-Le versioni precedenti sono conservate nella sottocartella versions;
-lo storico e le simulazioni sono in data, separati dal codice.
-Non e un EXE autonomo: utilizza Python e Edge/Chrome in finestra dedicata.
-A ogni apertura controlla GitHub su HTTPS; SHA-256 protegge l'integrita
-del pacchetto, ma non equivale a una firma digitale dell'autore.
-Windows potrebbe chiedere conferma per un file scaricato non firmato.
+Esporta tutto funziona anche durante lo studio, senza fermarlo.
+Il file ZIP viene salvato automaticamente in:
+Documenti\Crypto Desk\Esportazioni
+La fine della sessione genera un'altra esportazione completa. ultimo.json
+indica il file piu recente. Puoi dire a Codex che ha fatto e farlo leggere.
+Esci chiude subito la finestra; il motore termina il salvataggio in background.
 
-COME USARLO
-Premi Avvia ricerca automatica. Non serve impostare altro.
-Parte con 5 monete casuali (oppure conserva il piano precedente).
-Continua fino al completamento e salva automaticamente i risultati.
-Il PC deve restare acceso e connesso: puo durare ore.
-Pausa e salva ferma il lavoro; errori di rete fermano la ricerca.
-Dopo un arresto o riavvio premi lo stesso pulsante per riprendere.
-I risultati sono nella scheda Risultati, senza doverli esportare.
-Restano disponibili le sessioni manuali da 5/15/30 minuti.
+Il portafoglio storico parte da 1000 USDT e non viene resettato fra operazioni.
+Usa al massimo due posizioni, 20% del capitale per ingresso, costi e stop.
+Misura durata storica, tempo di calcolo, perdite e saldo finale. Si ferma a
+fine dati o a saldo esaurito. Non usa leva e non invia ordini reali.
+La ricerca usa il primo 80% dello storico. Le regole vengono congelate prima
+di verificare il 20% finale; la verifica gia fatta non viene ottimizzata.
+Solo regole che superano sviluppo, verifica, costi stress e rischio possono
+entrare nella simulazione attuale. Nessuna approvazione significa osservazione,
+non un errore del saldo. Il replay sperimentale include anche regole respinte.
+I dati Binance USDT sono differenti dal mercato Kraken EUR della simulazione.
+Il superamento dei controlli non garantisce profitti futuri.
 
-Panoramica: scegli quante monete (1-20) e per quanti minuti lavorare.
-Premi Avvia ricerca: al primo avvio sceglie automaticamente le monete.
-Cambia monete effettua una nuova estrazione quando la ricerca e ferma.
-Pausa e salva interrompe dopo i piccoli gruppi di test in corso.
-Riprendi ricerca continua il lavoro salvato sulle stesse monete.
-Risultati: classifiche e spiegazioni apribili.
-Simulazione: analisi del mercato attuale e trading SOLO virtuale.
-Le ricerche non attivano automaticamente strategie o acquisti.
-Il grafico profitto si popola soltanto con chiusure virtuali registrate.
-
-Ogni moneta: 200.000 valutazioni; 5 monete: 1 milione.
-Sono combinazioni di regole, periodi e costi, non strategie indipendenti.
-Il limite di tempo include il download. Possono servire piu sessioni.
-La prima esecuzione scarica fino a 24 archivi mensili per moneta.
-Dati mancanti fermano la ricerca, senza inventare o interpolare prezzi.
-Le monete sono estratte da 20 asset configurati, non tutto il mercato.
-Nessuna AI collegata, chiamata API a pagamento o ordine reale.
-
-CHIUSURA
-Usa Esci dentro l'app per fermare il motore e salvare.
-La X della finestra chiude solo la finestra: l'icona riapre il motore
-esistente senza avviare un secondo bot. Durante il salvataggio finale,
-l'installazione di aggiornamenti e bloccata: riprova appena finito.
-
-VERIFICA
-Test logica Python, interfaccia simulata e integrazione HTTP eseguiti
-nell'ambiente di sviluppo. Installatore e avvio su Windows devono ancora
-essere verificati sul PC dell'utente. Nessun test di redditivita implicito.
-
-GRAFICO ANIMATO
-Durante i calcoli mostra il replay di un test appena completato.
-Prezzi storici reali, acquisti verdi, vendite rosa, capitale del test USDT.
-Mostra fino a 240 candele del primo periodo di verifica, aggiornando
-il campione circa ogni 20 secondi. Non e un aggregato di tutti i test.
-Durante il download mostra la preparazione; senza dati non inventa prezzi.
+La CPU e la memoria disponibili determinano i processi paralleli. Indicatori
+e segnali vengono riutilizzati. La GPU non viene usata da questo motore.
+I sei moduli sono funzioni del programma, non agenti AI indipendenti.
+Dati e checkpoint restano in %LOCALAPPDATA%\CryptoDesk\data.
+L'installazione richiede Python 3.10+ e Edge/Chrome. Gli aggiornamenti si
+controllano all'apertura e mantengono i dati. Per installare su un altro PC,
+apri Crypto_Desk_Installa.cmd.

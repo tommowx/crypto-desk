@@ -7,12 +7,13 @@ const sample={portfolio:{positions:{},trades:[],halted:false},equity:1000,stale:
 async function refresh(){await vm.runInContext('refresh()',context)}
 (async()=>{
  context.fetch=async()=>({ok:true,json:async()=>structuredClone(sample)});await refresh();
- assert.equal(elements.deepStatus.textContent,'Pronto');assert.equal(elements.startAll.disabled,false);assert.equal(elements.exportAll.disabled,false);
+ assert.equal(elements.deepStatus.textContent,'In attesa di avviare la ricerca');assert.equal(elements.startAll.disabled,false);assert.equal(elements.exportAll.disabled,false);
  sample.deep={status:'running',done:0,total:1000};context.fetch=async()=>({ok:true,json:async()=>structuredClone(sample)});await refresh();assert.match(elements.profitChart.innerHTML,/Grafico basato su rilevazioni effettive/);assert.match(elements.profitChart.innerHTML,/polyline/);assert.equal(elements.chartMode.textContent,'TEST COMPLETATI');sample.deep={status:'idle'};sample.running=true;sample.equity=1003;context.fetch=async()=>({ok:true,json:async()=>structuredClone(sample)});await refresh();assert.equal(elements.chartMode.textContent,'SALDO SIMULATO');assert.match(elements.profitChart.innerHTML,/polyline/);sample.equity=1005;await refresh();assert.match(elements.replayLabel.textContent,/1005/);sample.running=false;
  context.fetch=async()=>{throw Error('offline')};await refresh();assert.match(elements.status.textContent,/Motore non raggiungibile/);assert.equal(elements.startAll.disabled,true);
  context.fetch=async()=>({ok:false,status:503});await refresh();assert.match(elements.status.textContent,/HTTP 503/);
  context.fetch=async()=>({ok:true,json:async()=>({})});await refresh();assert.match(elements.status.textContent,/Risposta non valida/);
  context.fetch=async()=>({ok:true,json:async()=>({...sample,portfolio:{}})});await refresh();assert.match(elements.status.textContent,/Motore raggiungibile, errore interfaccia/);
  context.fetch=async()=>({ok:true,json:async()=>structuredClone(sample)});await refresh();assert.equal(elements.startAll.disabled,false);
- console.log('6 UI scenarios passed (DOM simulated; no browser rendering test).');
+ sample.deep={status:'completed',done:1000000,total:1000000,progress_at:20,arena:{id:'finished',currency:'USDT',segment:'verifica finale',initial_balance:1000,historical_seconds:3600,compute_seconds:.1,drawdown_pct:2,stop_reason:'Fine dei dati storici',points:[{time:1,equity:1000,cash:1000,positions:0},{time:3601,equity:1020,cash:1020,positions:0}],trades:[]}};sample.export_info={status:'saving',started_at:21};await refresh();assert.equal(elements.completionBanner.hidden,true);sample.export_info.status='completed';await refresh();assert.equal(elements.completionBanner.hidden,false);sample.export_info.started_at=10;await refresh();assert.equal(elements.completionBanner.hidden,true);
+ console.log('9 UI scenarios passed (DOM simulated; no browser rendering test).');
 })().catch(e=>{console.error(e);process.exitCode=1});
