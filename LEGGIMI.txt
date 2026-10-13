@@ -1,4 +1,4 @@
-CRYPTO DESK 0.9.0
+CRYPTO DESK 0.9.1
 
 Apri sempre l'icona Crypto Desk sul desktop.
 Premi Inizia ad imparare: ricerca storica e simulazione partono insieme.

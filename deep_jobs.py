@@ -123,8 +123,10 @@ class DeepLab:
             (folder/'manifest.json').write_text(json.dumps(dict(version=VERSION,sources=manifest,configs=configs),ensure_ascii=False),encoding='utf-8')
             db=sqlite3.connect(folder/'checkpoint.sqlite3');db.execute('CREATE TABLE IF NOT EXISTS results (key TEXT PRIMARY KEY, payload TEXT NOT NULL)');db.commit()
             with self.lock: self.state['phase']='Lettura dei risultati già salvati'
-            for key,payload in db.execute('SELECT key,payload FROM results ORDER BY key'):
+            for row_number,(key,payload) in enumerate(db.execute('SELECT key,payload FROM results ORDER BY key'),1):
                 keys.add(key);ingest(json.loads(payload))
+                if row_number%2000==0:
+                    with self.lock:self.state.update(done=len(keys)*8,resumed=len(keys)*8,progress_at=time.time())
             resumed=len(keys)*8
             with self.lock:
                 self.state.update(done=resumed,resumed=resumed,total=len(datasets)*len(configs)*8,top=list(top),phase='Calcolo su quattro periodi progressivi',progress_at=time.time(),
@@ -191,7 +193,7 @@ class DeepLab:
                          resumed_evaluations=resumed,new_evaluations=len(keys)*8-resumed,all_four_positive=positive,parameter_coin_cost_results=len(keys),
                          input_sha256=fingerprint,elapsed_session_seconds=round(time.monotonic()-self.started,1),datasets=self.state['datasets'],top=top,walk_forward=walk,
                          full_results_file='checkpoint.sqlite3',methodology='12,500 rules x 2 costs x N selected coins x 4 folds x 2 windows = 200,000 evaluations per coin, not independent strategies. 24 full months Binance spot USDT, not Kraken EUR. Rolling earlier 40% training -> next 10% test, four periods, last 20% excluded. Train-only selection: return minus 0.5*drawdown, at least 20 trades. Top ranking uses test windows and is exploratory. Each window starts with 1000 USDT, 20% allocation. No combined portfolio, historical spread, delisted coins, taxes or 5% entry halt. All results stored in SQLite. No automatic strategy promotion. Repeated inspection is not independent validation.')
-            summary.update(application_version='0.9.0',workers=workers,chunk_size=32,validation=validation,
+            summary.update(application_version='0.9.1',workers=workers,chunk_size=32,validation=validation,
                            methodology='Development: first 80%, four rolling folds. One rule per asset frozen from last training fold using return minus 0.5*drawdown and at least 20 trades. Final 20% checked once for base and stressed costs; repeated identical checks reuse saved validation. Experimental continuous portfolio includes rejected rules and is visibly separate from approved paper rules. Maximum two positions, 20% per entry, next-open execution. No leverage or real orders. Cash conservation alone is not a pass.')
             tmp.write_text(json.dumps(summary,ensure_ascii=False,allow_nan=False),encoding='utf-8');os.replace(tmp,report)
             with self.lock: self.state.update(status=status,phase='Completato' if complete else 'Salvato: Avvia / Riprendi per continuare',report=str(report),progress_at=time.time())

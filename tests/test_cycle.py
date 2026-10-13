@@ -26,7 +26,7 @@ class CycleTests(unittest.TestCase):
         price=100 if self.calls==1 else 120
         return {'ETH':{'b':[str(price)],'a':[str(price+.1)],'c':[str(price)],'v':['0','10000'],'p':['0','100']}}
     def run_cycle(self,api=None,candle_error=None):
-        with patch.object(app,'api',side_effect=api or self.api), patch.object(app,'candles',return_value=self.rows,side_effect=candle_error), patch.object(app,'signal',return_value=(True,'test')), patch.object(app,'research',return_value={}), patch.object(app.time,'sleep'):
+        with patch.object(app,'api',side_effect=api or self.api), patch.object(app,'candles',return_value=self.rows,side_effect=candle_error), patch.object(app,'signal',return_value=(True,'test')), patch.object(app,'research',return_value={}), patch.object(app,'read_policies',return_value={'approved':[{'symbol':'ETH/USDT','config':{'strategy':'trend','fast':20,'slow':110,'stop':.03}}]}), patch.object(app,'learned_signal',return_value=(True,False,'test')), patch.object(app.time,'sleep'):
             app.cycle()
     def test_fills_use_refreshed_quote(self):
         self.run_cycle()

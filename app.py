@@ -11,7 +11,7 @@ DATA=Path(os.environ.get('CRYPTO_DESK_DATA',str(ROOT/'data'))); DATA.mkdir(paren
 LAB=BatchLab(DATA); DEEP=DeepLab(DATA)
 STOP_EVENT=threading.Event()
 LOCK=threading.RLock(); TOKEN=secrets.token_urlsafe(24); PORT=8877
-VERSION="0.9.0"; MAX_QUOTE_AGE=180
+VERSION="0.9.1"; MAX_QUOTE_AGE=180
 ROLES=['Scanner','Selezionatore','Analista','Critico','Rischio','Simulatore']
 STATE={'busy':False,'running':False,'stage':'Pronto','updated':None,'quotes_at':None,'warnings':[],'market':[],'analyses':{},'logs':[],'roles':{r:'In attesa' for r in ROLES},'error':None}
 ROLE_ACTIVITY={r:dict(events=0,last_at=None) for r in ROLES}
@@ -103,7 +103,7 @@ def cycle():
                 if rule:wanted,leave,why=learned_signal(rows,rule)
                 else:wanted,why=signal(rows);leave=not wanted
                 # Existing positions retain their original exit rules; unapproved assets cannot enter.
-                if policies and not held_rule and m['symbol'].split('/')[0] not in approved:wanted=False
+                if m['symbol'].split('/')[0] not in approved:wanted=False
                 analyses[m['pair']]={'symbol':m['symbol'],'rows':rows,'signal':wanted,'exit_signal':leave,'rule':rule,'reason':why,'tests':research(rows)}
                 log('Critico',m['symbol']+': storico di circa 30 giorni; test preliminare, nessuna validazione per soldi reali.')
             except Exception as e:
@@ -126,7 +126,7 @@ def cycle():
             else: log('Simulatore','In pausa: analisi aggiornata, nessuna operazione')
         log('Rischio','Solo spot simulato. Massimo 2 posizioni, 20% ciascuna; commissione ipotizzata 0,40% e slippage 0,10% per lato.')
         with LOCK: STATE['stage']='Ciclo completato'
-        if policies and not approved:log('Simulatore','Nessuna regola ha superato la verifica finale: osservazione attiva, allenamento storico disponibile')
+        if not approved:log('Simulatore','Nessuna regola ha superato la verifica finale: osservazione attiva, allenamento storico disponibile')
         elif not any(a['signal'] for a in analyses.values()):log('Simulatore','In attesa di un segnale: nessun ingresso conforme alle regole')
     except Exception as e:
         with LOCK: STATE['error']=str(e); STATE['stage']='Errore dati: nessuna nuova operazione'
